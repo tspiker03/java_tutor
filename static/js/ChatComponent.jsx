@@ -35,42 +35,52 @@ const ChatComponent = () => {
 
         const userMessage = input.trim();
         setInput('');
-        
-        // Add user message to chat
-        setMessages(prev => [...prev, { role: 'user', content: userMessage }]);
-        
         setIsLoading(true);
+
+        console.log('Sending message:', userMessage);
+        console.log('Session ID:', sessionId.current);
+
         try {
-            const response = await fetch('/.netlify/functions/chat', {
+            // Add user message to chat
+            setMessages(prev => [...prev, { role: 'user', content: userMessage }]);
+
+            const response = await fetch('/api/chat', {
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/json'
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
                 },
                 body: JSON.stringify({
                     message: userMessage,
-                    sessionId: sessionId.current,
-                    history: messages
+                    sessionId: sessionId.current
                 })
             });
 
+            console.log('Response status:', response.status);
+            const contentType = response.headers.get('Content-Type');
+            console.log('Response content type:', contentType);
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.error('Error response:', errorText);
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
             const data = await response.json();
+            console.log('Received response:', data);
             
             if (data.error) {
                 throw new Error(data.error);
             }
 
-            // Update messages with the response and history
-            if (data.history) {
-                setMessages(data.history);
-            } else {
-                setMessages(prev => [...prev, { role: 'assistant', content: data.response }]);
-            }
+            // Add assistant's response to chat
+            setMessages(prev => [...prev, { role: 'assistant', content: data.response }]);
 
         } catch (error) {
-            console.error('Error:', error);
+            console.error('Error details:', error);
             setMessages(prev => [...prev, {
                 role: 'assistant',
-                content: 'Sorry, there was an error processing your message.'
+                content: `Sorry, there was an error processing your message: ${error.message}`
             }]);
         } finally {
             setIsLoading(false);
