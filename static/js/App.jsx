@@ -8,13 +8,13 @@ const App = () => {
     return (
         <div className="app-container">
             <div className="instructions">
-                <h2>How to Use</h2>
+                <h2>Java Programming Tutor</h2>
                 <ol>
-                    <li>Ask any question or describe what you need help with.</li>
-                    <li>The AI will show its thinking process before providing the answer.</li>
-                    <li>You can see how the AI reasons through your questions step by step.</li>
-                    <li>Feel free to ask follow-up questions or request clarification.</li>
-                    <li>The AI will maintain context of your conversation.</li>
+                    <li>Ask any Java programming question or describe the Java concept you need help with.</li>
+                    <li>The tutor will guide you through Java concepts step by step.</li>
+                    <li>Practice writing Java code with guided assistance.</li>
+                    <li>Get feedback on your Java code and solutions.</li>
+                    <li>Learn Java programming through interactive problem-solving.</li>
                 </ol>
             </div>
             <ChatComponent />

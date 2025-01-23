@@ -114,7 +114,7 @@ const ChatComponent = () => {
                             handleSubmit(e);
                         }
                     }}
-                    placeholder="Type your message here..."
+                    placeholder="Ask your Java programming question here..."
                     disabled={isLoading}
                 />
                 <button type="submit" disabled={isLoading}>
