@@ -1,1 +1,1 @@
-web: python -m gunicorn app:app --bind 0.0.0.0:$PORT --log-file -
+web: gunicorn app:app --timeout 120 --workers 4 --log-level debug --access-logfile - --error-logfile -
