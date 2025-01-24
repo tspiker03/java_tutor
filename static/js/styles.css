@@ -25,14 +25,15 @@ body {
 }
 
 .instructions h2 {
-    margin-bottom: 15px;
+    margin-bottom: 20px;
     color: #007bff;
     font-size: 1.3rem;
 }
 
 .instructions ol {
     padding-left: 20px;
-    font-size: 0.9rem;
+    font-size: 0.95rem;
+    line-height: 1.5;
 }
 
 .instructions li {
@@ -40,12 +41,13 @@ body {
 }
 
 .instructions .example {
-    font-size: 0.85rem;
     color: #666;
-    margin-top: 5px;
-    padding-left: 10px;
-    border-left: 2px solid #ddd;
+    padding: 10px;
+    margin: 10px 0;
+    background-color: #f8f9fa;
+    border-left: 3px solid #007bff;
     font-style: italic;
+    display: block;
 }
 
 .chat-interface {
