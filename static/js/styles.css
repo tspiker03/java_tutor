@@ -17,7 +17,7 @@ body {
 }
 
 .instructions {
-    width: 400px;
+    width: 300px;
     padding: 20px;
     background: white;
     box-shadow: 2px 0 4px rgba(0,0,0,0.1);
@@ -27,25 +27,14 @@ body {
 .instructions h2 {
     margin-bottom: 15px;
     color: #007bff;
-    font-size: 1.4rem;
 }
 
 .instructions ol {
     padding-left: 20px;
-    font-size: 0.95rem;
 }
 
 .instructions li {
     margin-bottom: 15px;
-}
-
-.instructions em {
-    display: block;
-    margin-top: 5px;
-    color: #666;
-    font-size: 0.9rem;
-    padding-left: 10px;
-    border-left: 2px solid #ddd;
 }
 
 .chat-interface {
