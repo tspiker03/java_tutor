@@ -4,12 +4,17 @@ const ChatComponent = () => {
     const [messages, setMessages] = useState([]);
     const [input, setInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
+    const [sessionId, setSessionId] = useState('');
     const messagesEndRef = useRef(null);
-    const sessionId = useRef(Math.random().toString(36).substring(2));
 
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     };
+
+    useEffect(() => {
+        // Generate new sessionId when component mounts (page loads/refreshes)
+        setSessionId(Math.random().toString(36).substring(2));
+    }, []); // Empty dependency array means this runs once on mount
 
     useEffect(() => {
         scrollToBottom();
@@ -38,7 +43,7 @@ const ChatComponent = () => {
         setIsLoading(true);
 
         console.log('Sending message:', userMessage);
-        console.log('Session ID:', sessionId.current);
+        console.log('Session ID:', sessionId);
 
         try {
             // Add user message to chat
@@ -52,7 +57,7 @@ const ChatComponent = () => {
                 },
                 body: JSON.stringify({
                     message: userMessage,
-                    sessionId: sessionId.current
+                    sessionId: sessionId
                 })
             });
 
