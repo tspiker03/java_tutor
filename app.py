@@ -44,35 +44,78 @@ if not GOOGLE_API_KEY:
 
 genai.configure(api_key=GOOGLE_API_KEY)
 
-# Load default system prompt from file
+# Load default system prompt and subject from file
 with open('optimized_prompt.txt', 'r') as file:
     DEFAULT_SYSTEM_PROMPT = file.read().strip()
+
+# Default subject
+DEFAULT_SUBJECT = "Python"
 
 # Admin credentials
 ADMIN_USERNAME = os.getenv('ADMIN_USERNAME', 'admin')
 ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', 'password')
 
+# In-memory storage for non-Redis environments
+in_memory_storage = {
+    'system_prompt': None,
+    'subject': None
+}
+
 def get_system_prompt():
-    """Get system prompt from Redis or fallback to default"""
+    """Get system prompt from Redis/memory or fallback to default"""
     try:
         if USE_REDIS:
             prompt = redis_client.get('system_prompt')
             if prompt:
                 return prompt.decode('utf-8')
+        elif in_memory_storage['system_prompt']:
+            return in_memory_storage['system_prompt']
         return DEFAULT_SYSTEM_PROMPT
     except Exception as e:
         print(f"Error getting system prompt: {str(e)}")
         return DEFAULT_SYSTEM_PROMPT
 
-def set_system_prompt(prompt):
-    """Set system prompt in Redis"""
+def get_subject():
+    """Get subject from Redis/memory or fallback to default"""
     try:
         if USE_REDIS:
+            subject = redis_client.get('subject')
+            if subject:
+                return subject.decode('utf-8')
+        elif in_memory_storage['subject']:
+            return in_memory_storage['subject']
+        return DEFAULT_SUBJECT
+    except Exception as e:
+        print(f"Error getting subject: {str(e)}")
+        return DEFAULT_SUBJECT
+
+def set_system_prompt(prompt, set_as_default=False):
+    """Set system prompt in Redis/memory and optionally as default"""
+    try:
+        if set_as_default:
+            # Write to optimized_prompt.txt
+            with open('optimized_prompt.txt', 'w') as file:
+                file.write(prompt)
+        
+        if USE_REDIS:
             redis_client.set('system_prompt', prompt)
-            return True
-        return False
+        else:
+            in_memory_storage['system_prompt'] = prompt
+        return True
     except Exception as e:
         print(f"Error setting system prompt: {str(e)}")
+        return False
+
+def set_subject(subject):
+    """Set subject in Redis/memory"""
+    try:
+        if USE_REDIS:
+            redis_client.set('subject', subject)
+        else:
+            in_memory_storage['subject'] = subject
+        return True
+    except Exception as e:
+        print(f"Error setting subject: {str(e)}")
         return False
 
 def check_auth(username, password):
@@ -100,9 +143,10 @@ class ChatSession:
         self.session_id = session_id
         self.model = genai.GenerativeModel("gemini-2.0-flash-thinking-exp")
         system_prompt = get_system_prompt()
+        subject = get_subject()
         self.history = [
             {"role": "user", "parts": [system_prompt]},
-            {"role": "model", "parts": ["Understood. I will act as a computer science teacher specializing in Python, helping students learn step by step while encouraging their own problem-solving abilities."]}
+            {"role": "model", "parts": [f"Understood. I will act as a computer science teacher specializing in {subject}, helping students learn step by step while encouraging their own problem-solving abilities."]}
         ]
         self.last_accessed = datetime.utcnow()
 
@@ -196,22 +240,55 @@ def serve(path):
         return send_from_directory(app.static_folder, path)
     return render_template('chat.html')
 
+@app.route('/api/subject', methods=['GET'])
+def get_subject_endpoint():
+    """Get current subject"""
+    try:
+        subject = get_subject()
+        return jsonify({'subject': subject})
+    except Exception as e:
+        print(f"Error getting subject: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/admin/prompt', methods=['GET', 'POST'])
 @requires_auth
 def admin_prompt():
     if request.method == 'GET':
         current_prompt = get_system_prompt()
+        current_subject = get_subject()
         return render_template('admin_prompt.html', 
                              current_prompt=current_prompt,
-                             default_prompt=DEFAULT_SYSTEM_PROMPT)
+                             default_prompt=DEFAULT_SYSTEM_PROMPT,
+                             current_subject=current_subject)
     else:
         new_prompt = request.form.get('prompt')
+        new_subject = request.form.get('subject')
+        set_as_default = request.form.get('set_as_default') == 'true'
+        
+        success = True
+        message = []
+        
         if new_prompt:
-            if set_system_prompt(new_prompt):
-                return jsonify({'status': 'success', 'message': 'Prompt updated successfully'})
+            if set_system_prompt(new_prompt, set_as_default):
+                message.append('Prompt updated successfully')
             else:
-                return jsonify({'status': 'error', 'message': 'Failed to update prompt'}), 500
-        return jsonify({'status': 'error', 'message': 'No prompt provided'}), 400
+                success = False
+                message.append('Failed to update prompt')
+        
+        if new_subject:
+            if set_subject(new_subject):
+                message.append('Subject updated successfully')
+            else:
+                success = False
+                message.append('Failed to update subject')
+        
+        if not (new_prompt or new_subject):
+            return jsonify({'status': 'error', 'message': 'No updates provided'}), 400
+            
+        return jsonify({
+            'status': 'success' if success else 'error',
+            'message': ' and '.join(message)
+        }), 200 if success else 500
 
 @app.route('/api/chat', methods=['POST'])
 def chat_endpoint():

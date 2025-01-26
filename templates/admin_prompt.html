@@ -13,6 +13,27 @@
             padding: 20px;
             background: #f5f5f5;
         }
+        .form-control {
+            width: 100%;
+            padding: 8px;
+            margin-bottom: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        .help-text {
+            color: #666;
+            font-size: 12px;
+            margin-top: -8px;
+            margin-bottom: 15px;
+            display: block;
+        }
+        .checkbox-group {
+            margin: 10px 0;
+        }
+        .checkbox-group input[type="checkbox"] {
+            margin-right: 8px;
+        }
         .container {
             background: white;
             padding: 20px;
@@ -94,10 +115,21 @@
 
         <form id="promptForm" method="POST">
             <div class="form-group">
+                <label for="subject">Subject:</label>
+                <input type="text" id="subject" name="subject" value="{{ current_subject }}" class="form-control">
+                <small class="help-text">This will replace all instances of "Python" in the UI</small>
+            </div>
+            
+            <div class="form-group">
                 <label for="prompt">Current Prompt:</label>
                 <textarea id="prompt" name="prompt">{{ current_prompt }}</textarea>
+                <div class="checkbox-group">
+                    <input type="checkbox" id="setAsDefault" name="set_as_default">
+                    <label for="setAsDefault">Set as Default Prompt</label>
+                </div>
             </div>
-            <button type="submit">Update Prompt</button>
+            
+            <button type="submit">Update Settings</button>
         </form>
 
         <div id="message" style="display: none;" class="message"></div>
@@ -108,6 +140,10 @@
             e.preventDefault();
             const form = e.target;
             const messageDiv = document.getElementById('message');
+            const formData = new FormData(form);
+            
+            // Add checkbox value as string
+            formData.set('set_as_default', document.getElementById('setAsDefault').checked ? 'true' : 'false');
             
             try {
                 const response = await fetch('/admin/prompt', {
@@ -115,7 +151,7 @@
                     headers: {
                         'Content-Type': 'application/x-www-form-urlencoded',
                     },
-                    body: new URLSearchParams(new FormData(form))
+                    body: new URLSearchParams(formData)
                 });
                 
                 const result = await response.json();

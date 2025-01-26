@@ -3,11 +3,12 @@ const { GoogleGenerativeAI } = require("@google/generative-ai");
 // Initialize Google AI with v1alpha API version
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY, { apiVersion: "v1alpha" });
 
-// Load system prompt from file
+// Load system prompt and set default subject
 const fs = require('fs');
 const path = require('path');
 
 const SYSTEM_PROMPT = fs.readFileSync(path.join(__dirname, '../../optimized_prompt.txt'), 'utf8').trim();
+const DEFAULT_SUBJECT = process.env.SUBJECT || "Python";
 
 exports.handler = async function(event, context) {
     // Only allow POST
@@ -40,7 +41,7 @@ exports.handler = async function(event, context) {
             });
             chatHistory.push({
                 role: 'model',
-                parts: ["Understood. I will act as a Python teacher following the specified guidelines to help students learn effectively."]
+                parts: [`Understood. I will act as a ${DEFAULT_SUBJECT} teacher following the specified guidelines to help students learn effectively.`]
             });
         }
 

@@ -1,14 +1,31 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import ChatComponent from './ChatComponent';
 
 import './styles.css';
 
 const App = () => {
+    const [subject, setSubject] = useState('Python');
+
+    useEffect(() => {
+        const fetchSubject = async () => {
+            try {
+                const response = await fetch('/api/subject');
+                if (response.ok) {
+                    const data = await response.json();
+                    setSubject(data.subject);
+                }
+            } catch (error) {
+                console.error('Error fetching subject:', error);
+            }
+        };
+        fetchSubject();
+    }, []);
+
     return (
         <div className="app-container">
             <div className="instructions">
-                <h2>How to use the Python Programming Tutor:</h2>
+                <h2>How to use the {subject} Programming Tutor:</h2>
                 <ol>
                     <li>Clearly explain in a conversational manner what you want.
                         <div className="example">Example: Can you help me with the exercise: [insert full exercise]? Here is what I have so far: [insert code].</div>
