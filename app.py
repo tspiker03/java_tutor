@@ -4,7 +4,7 @@ import sys
 import redis
 from dotenv import load_dotenv
 import google.generativeai as genai
-from flask_jwt_extended import JWTManager, create_access_token, jwt_required, set_access_cookies, unset_jwt_cookies
+from flask_jwt_extended import JWTManager, create_access_token, jwt_required, set_access_cookies, unset_jwt_cookies, verify_jwt_in_request
 from functools import wraps
 from datetime import timedelta
 
@@ -89,9 +89,14 @@ ADMIN_PASSWORD = "password"
 
 def admin_required(fn):
     @wraps(fn)
-    @jwt_required()
     def wrapper(*args, **kwargs):
-        return fn(*args, **kwargs)
+        try:
+            # Verify JWT token
+            verify_jwt_in_request()
+            return fn(*args, **kwargs)
+        except:
+            # Redirect to login if no valid token
+            return redirect(url_for('admin_login'))
     return wrapper
 
 # Configure Gemini API
