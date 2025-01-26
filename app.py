@@ -202,7 +202,7 @@ class ChatSession:
         subject = get_subject()
         self.history = [
             {"role": "user", "parts": [system_prompt]},
-            {"role": "model", "parts": [f"Understood. I will act as a computer science teacher specializing in {subject}, helping students learn step by step while encouraging their own problem-solving abilities."]}
+            {"role": "model", "parts": [f"Understood. I will act as a teacher specializing in {subject}, helping students learn step by step while encouraging their own problem-solving abilities."]}
         ]
         self.last_accessed = datetime.utcnow()
 
