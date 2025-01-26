@@ -8,7 +8,7 @@ const App = () => {
     return (
         <div className="app-container">
             <div className="instructions">
-                How to use the Python Programming Tutor:
+                <div className="title">How to use the Python Programming Tutor:</div>
 
                 1. Clearly explain in a conversational manner what you want.
                 Example: Can you help me with the exercise: [insert full exercise]? Here is what I have so far: [insert code].

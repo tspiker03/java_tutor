@@ -24,30 +24,17 @@ body {
     overflow-y: auto;
 }
 
-.instructions h2 {
-    margin-bottom: 20px;
-    color: #007bff;
-    font-size: 1.3rem;
-}
-
-.instructions ol {
-    padding-left: 20px;
+.instructions {
+    white-space: pre-wrap;
     font-size: 0.95rem;
     line-height: 1.5;
 }
 
-.instructions li {
-    margin-bottom: 15px;
-}
-
-.instructions .example {
-    color: #666;
-    padding: 10px;
-    margin: 10px 0;
-    background-color: #f8f9fa;
-    border-left: 3px solid #007bff;
-    font-style: italic;
-    display: block;
+.instructions .title {
+    color: #007bff;
+    font-size: 1.3rem;
+    margin-bottom: 20px;
+    font-weight: bold;
 }
 
 .chat-interface {
