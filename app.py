@@ -59,8 +59,45 @@ ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', 'password')
 # In-memory storage for non-Redis environments
 in_memory_storage = {
     'system_prompt': None,
-    'subject': None
+    'subject': None,
+    'saved_prompts': {}  # Format: {name: prompt_text}
 }
+
+def get_saved_prompts():
+    """Get all saved prompts"""
+    try:
+        if USE_REDIS:
+            prompts = redis_client.hgetall('saved_prompts')
+            return {k.decode('utf-8'): v.decode('utf-8') for k, v in prompts.items()}
+        return in_memory_storage['saved_prompts']
+    except Exception as e:
+        print(f"Error getting saved prompts: {str(e)}")
+        return {}
+
+def save_prompt(name, prompt):
+    """Save a prompt with a name"""
+    try:
+        if USE_REDIS:
+            redis_client.hset('saved_prompts', name, prompt)
+        else:
+            in_memory_storage['saved_prompts'][name] = prompt
+        return True
+    except Exception as e:
+        print(f"Error saving prompt: {str(e)}")
+        return False
+
+def delete_prompt(name):
+    """Delete a saved prompt"""
+    try:
+        if USE_REDIS:
+            redis_client.hdel('saved_prompts', name)
+        else:
+            if name in in_memory_storage['saved_prompts']:
+                del in_memory_storage['saved_prompts'][name]
+        return True
+    except Exception as e:
+        print(f"Error deleting prompt: {str(e)}")
+        return False
 
 def rebuild_frontend():
     """Rebuild the frontend using webpack"""
@@ -318,20 +355,57 @@ def get_subject_endpoint():
         print(f"Error getting subject: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/prompts', methods=['GET', 'POST', 'DELETE'])
+@requires_auth
+def manage_prompts():
+    """Endpoint to manage saved prompts"""
+    try:
+        if request.method == 'GET':
+            prompts = get_saved_prompts()
+            return jsonify(prompts)
+        
+        elif request.method == 'POST':
+            data = request.get_json()
+            name = data.get('name')
+            prompt = data.get('prompt')
+            
+            if not name or not prompt:
+                return jsonify({'error': 'Name and prompt are required'}), 400
+                
+            if save_prompt(name, prompt):
+                return jsonify({'status': 'success', 'message': f'Prompt "{name}" saved successfully'})
+            return jsonify({'error': 'Failed to save prompt'}), 500
+            
+        elif request.method == 'DELETE':
+            name = request.args.get('name')
+            if not name:
+                return jsonify({'error': 'Prompt name is required'}), 400
+                
+            if delete_prompt(name):
+                return jsonify({'status': 'success', 'message': f'Prompt "{name}" deleted successfully'})
+            return jsonify({'error': 'Failed to delete prompt'}), 500
+            
+    except Exception as e:
+        print(f"Error managing prompts: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/admin/prompt', methods=['GET', 'POST'])
 @requires_auth
 def admin_prompt():
     if request.method == 'GET':
         current_prompt = get_system_prompt()
         current_subject = get_subject()
+        saved_prompts = get_saved_prompts()
         return render_template('admin_prompt.html', 
                              current_prompt=current_prompt,
                              default_prompt=DEFAULT_SYSTEM_PROMPT,
-                             current_subject=current_subject)
+                             current_subject=current_subject,
+                             saved_prompts=saved_prompts)
     else:
         new_prompt = request.form.get('prompt')
         new_subject = request.form.get('subject')
         set_as_default = request.form.get('set_as_default') == 'true'
+        prompt_name = request.form.get('prompt_name')
         
         success = True
         message = []
@@ -339,6 +413,12 @@ def admin_prompt():
         if new_prompt:
             if set_system_prompt(new_prompt, set_as_default):
                 message.append('Prompt updated successfully')
+                if prompt_name:  # If a name was provided, also save it to saved prompts
+                    if save_prompt(prompt_name, new_prompt):
+                        message.append(f'Prompt saved as "{prompt_name}"')
+                    else:
+                        success = False
+                        message.append(f'Failed to save prompt as "{prompt_name}"')
             else:
                 success = False
                 message.append('Failed to update prompt')
