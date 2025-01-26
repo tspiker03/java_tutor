@@ -8,7 +8,7 @@ const App = () => {
     return (
         <div className="app-container">
             <div className="instructions">
-                <h2>How to use the Java Programming Tutor:</h2>
+                <h2>How to use the Python Programming Tutor:</h2>
                 <ol>
                     <li>Clearly explain in a conversational manner what you want.
                         <div className="example">Example: Can you help me with the exercise: [insert full exercise]? Here is what I have so far: [insert code].</div>

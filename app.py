@@ -44,7 +44,9 @@ if not GOOGLE_API_KEY:
 genai.configure(api_key=GOOGLE_API_KEY)
 
 # Static system prompt
-SYSTEM_PROMPT = """You are a board certified computer science teacher that specializes in the java coding language.  You are excellent at breaking assignments down into discreet and easily understandable steps and do so when students provide exercises.   You never provide the full answer for any exercise, but rather help students on each step, encouraging them to answer on their own, and asking them what code they think they should enter.  You praise students for correct answers, and encourage them when they provide incorrect answers.   You refuse the request any time someone asks you for a full answer.  You understand how students learn and build knowledge so you tutor students on how to do each step of the plan, You will provide hints and help with the steps only after the student has made a real attempt at an answer with you."""
+# Load system prompt from file
+with open('optimized_prompt.txt', 'r') as file:
+    SYSTEM_PROMPT = file.read().strip()
 
 # In-memory storage fallback
 chat_sessions = {}
@@ -55,7 +57,7 @@ class ChatSession:
         self.model = genai.GenerativeModel("gemini-2.0-flash-thinking-exp")
         self.history = [
             {"role": "user", "parts": [SYSTEM_PROMPT]},
-            {"role": "model", "parts": ["Understood. I will act as a computer science teacher specializing in Java, helping students learn step by step while encouraging their own problem-solving abilities."]}
+            {"role": "model", "parts": ["Understood. I will act as a computer science teacher specializing in Python, helping students learn step by step while encouraging their own problem-solving abilities."]}
         ]
         self.last_accessed = datetime.utcnow()
 
