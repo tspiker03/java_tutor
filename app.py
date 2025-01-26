@@ -65,11 +65,44 @@ in_memory_storage = {
 def rebuild_frontend():
     """Rebuild the frontend using webpack"""
     try:
-        # Run npm build
-        subprocess.run(['npm', 'run', 'build'], check=True)
+        # Get the current working directory
+        cwd = os.getcwd()
+        print(f"Current working directory: {cwd}")
+        
+        # List files in current directory
+        print("Files in current directory:")
+        for file in os.listdir(cwd):
+            print(f"- {file}")
+        
+        # Check if package.json exists
+        if not os.path.exists('package.json'):
+            print("Error: package.json not found")
+            return False
+            
+        # Run npm build with explicit error output
+        result = subprocess.run(
+            ['npm', 'run', 'build'],
+            capture_output=True,
+            text=True,
+            check=False
+        )
+        
+        # Log the output
+        print("Build output:")
+        print(result.stdout)
+        if result.stderr:
+            print("Build errors:")
+            print(result.stderr)
+            
+        # Check if build was successful
+        if result.returncode != 0:
+            print(f"Build failed with return code: {result.returncode}")
+            return False
+            
         return True
-    except subprocess.CalledProcessError as e:
+    except Exception as e:
         print(f"Error rebuilding frontend: {str(e)}")
+        traceback.print_exc()
         return False
 
 def get_system_prompt():
@@ -120,15 +153,21 @@ def set_system_prompt(prompt, set_as_default=False):
 def set_subject(subject):
     """Set subject in Redis/memory and trigger rebuild"""
     try:
+        # First store the subject
         if USE_REDIS:
             redis_client.set('subject', subject)
         else:
             in_memory_storage['subject'] = subject
         
-        # Trigger frontend rebuild
-        rebuild_success = rebuild_frontend()
-        if not rebuild_success:
-            raise Exception("Failed to rebuild frontend")
+        # Attempt rebuild but don't fail if it doesn't work
+        # This allows subject changes to work even if rebuild fails
+        try:
+            rebuild_success = rebuild_frontend()
+            if not rebuild_success:
+                print("Warning: Frontend rebuild failed but subject was updated")
+        except Exception as rebuild_error:
+            print(f"Warning: Frontend rebuild error: {str(rebuild_error)}")
+            traceback.print_exc()
         
         return True
     except Exception as e:
