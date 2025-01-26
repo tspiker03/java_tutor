@@ -13,14 +13,25 @@ const App = () => {
                 const response = await fetch('/api/subject');
                 if (response.ok) {
                     const data = await response.json();
-                    setSubject(data.subject);
+                    if (data.subject !== subject) {
+                        setSubject(data.subject);
+                        // Clear any existing chat state if subject changes
+                        localStorage.removeItem('chatHistory');
+                    }
                 }
             } catch (error) {
                 console.error('Error fetching subject:', error);
             }
         };
+
+        // Initial fetch
         fetchSubject();
-    }, []);
+
+        // Poll for subject changes every 5 seconds
+        const interval = setInterval(fetchSubject, 5000);
+
+        return () => clearInterval(interval);
+    }, [subject]);
 
     return (
         <div className="app-container">

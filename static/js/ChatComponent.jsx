@@ -14,6 +14,18 @@ const ChatComponent = () => {
     useEffect(() => {
         // Generate new sessionId when component mounts (page loads/refreshes)
         setSessionId(Math.random().toString(36).substring(2));
+
+        // Listen for storage events (chat reset)
+        const handleStorageChange = (e) => {
+            if (e.key === 'chatHistory' && e.newValue === null) {
+                setMessages([]);
+                setInput('');
+                setSessionId(Math.random().toString(36).substring(2));
+            }
+        };
+
+        window.addEventListener('storage', handleStorageChange);
+        return () => window.removeEventListener('storage', handleStorageChange);
     }, []); // Empty dependency array means this runs once on mount
 
     useEffect(() => {
@@ -119,7 +131,7 @@ const ChatComponent = () => {
                             handleSubmit(e);
                         }
                     }}
-                    placeholder="Ask your Python programming question here..."
+                    placeholder="Ask your programming question here..."
                     disabled={isLoading}
                 />
                 <button type="submit" disabled={isLoading}>

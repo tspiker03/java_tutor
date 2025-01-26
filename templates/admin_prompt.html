@@ -81,6 +81,31 @@
             border-radius: 4px;
             cursor: pointer;
             font-size: 16px;
+            position: relative;
+        }
+
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .loading::after {
+            content: '';
+            position: absolute;
+            width: 16px;
+            height: 16px;
+            top: 50%;
+            right: 10px;
+            margin-top: -8px;
+            border: 2px solid #fff;
+            border-radius: 50%;
+            border-right-color: transparent;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
         }
         button:hover {
             background: #0056b3;
@@ -113,7 +138,7 @@
             </div>
         </div>
 
-        <form id="promptForm" method="POST">
+        <form id="promptForm" method="POST" onsubmit="return handleSubmit(event)">
             <div class="form-group">
                 <label for="subject">Subject:</label>
                 <input type="text" id="subject" name="subject" value="{{ current_subject }}" class="form-control">
@@ -136,14 +161,19 @@
     </div>
 
     <script>
-        document.getElementById('promptForm').addEventListener('submit', async (e) => {
+        async function handleSubmit(e) {
             e.preventDefault();
             const form = e.target;
+            const submitButton = form.querySelector('button[type="submit"]');
             const messageDiv = document.getElementById('message');
             const formData = new FormData(form);
             
             // Add checkbox value as string
             formData.set('set_as_default', document.getElementById('setAsDefault').checked ? 'true' : 'false');
+            
+            // Disable button and show loading state
+            submitButton.disabled = true;
+            submitButton.classList.add('loading');
             
             try {
                 const response = await fetch('/admin/prompt', {
@@ -161,16 +191,29 @@
                 messageDiv.style.display = 'block';
                 
                 if (response.ok) {
-                    setTimeout(() => {
-                        messageDiv.style.display = 'none';
-                    }, 3000);
+                    // If subject was updated, reload the page after a delay
+                    if (formData.get('subject')) {
+                        setTimeout(() => {
+                            window.location.reload();
+                        }, 3000);
+                    } else {
+                        setTimeout(() => {
+                            messageDiv.style.display = 'none';
+                        }, 3000);
+                    }
                 }
             } catch (error) {
-                messageDiv.textContent = 'An error occurred while updating the prompt';
+                messageDiv.textContent = 'An error occurred while updating the settings';
                 messageDiv.className = 'message error';
                 messageDiv.style.display = 'block';
+            } finally {
+                // Re-enable button and remove loading state
+                submitButton.disabled = false;
+                submitButton.classList.remove('loading');
             }
-        });
+            
+            return false;
+        }
     </script>
 </body>
 </html>

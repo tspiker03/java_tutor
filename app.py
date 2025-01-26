@@ -2,6 +2,7 @@ from flask import Flask, render_template, request, jsonify, Response, stream_wit
 from flask_cors import CORS
 import os
 import sys
+import subprocess
 from dotenv import load_dotenv
 import google.generativeai as genai
 import traceback
@@ -61,6 +62,16 @@ in_memory_storage = {
     'subject': None
 }
 
+def rebuild_frontend():
+    """Rebuild the frontend using webpack"""
+    try:
+        # Run npm build
+        subprocess.run(['npm', 'run', 'build'], check=True)
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"Error rebuilding frontend: {str(e)}")
+        return False
+
 def get_system_prompt():
     """Get system prompt from Redis/memory or fallback to default"""
     try:
@@ -107,12 +118,18 @@ def set_system_prompt(prompt, set_as_default=False):
         return False
 
 def set_subject(subject):
-    """Set subject in Redis/memory"""
+    """Set subject in Redis/memory and trigger rebuild"""
     try:
         if USE_REDIS:
             redis_client.set('subject', subject)
         else:
             in_memory_storage['subject'] = subject
+        
+        # Trigger frontend rebuild
+        rebuild_success = rebuild_frontend()
+        if not rebuild_success:
+            raise Exception("Failed to rebuild frontend")
+        
         return True
     except Exception as e:
         print(f"Error setting subject: {str(e)}")
@@ -239,6 +256,18 @@ def serve(path):
     if path and os.path.exists(os.path.join(app.static_folder, path)):
         return send_from_directory(app.static_folder, path)
     return render_template('chat.html')
+
+@app.route('/api/rebuild', methods=['POST'])
+@requires_auth
+def rebuild_endpoint():
+    """Endpoint to manually trigger frontend rebuild"""
+    try:
+        if rebuild_frontend():
+            return jsonify({'status': 'success', 'message': 'Frontend rebuilt successfully'})
+        return jsonify({'status': 'error', 'message': 'Failed to rebuild frontend'}), 500
+    except Exception as e:
+        print(f"Error in rebuild endpoint: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/subject', methods=['GET'])
 def get_subject_endpoint():
