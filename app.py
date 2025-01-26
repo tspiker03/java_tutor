@@ -1,8 +1,30 @@
-from flask import Flask, render_template, request, jsonify, Response, stream_with_context, send_from_directory
+from flask import Flask, render_template, request, jsonify, Response, stream_with_context, send_from_directory, redirect, url_for
 import os
 import sys
+import redis
 from dotenv import load_dotenv
 import google.generativeai as genai
+
+# Initialize Redis
+redis_client = redis.Redis(
+    host=os.getenv('REDIS_HOST', 'localhost'),
+    port=int(os.getenv('REDIS_PORT', 6379)),
+    db=int(os.getenv('REDIS_DB', 0)),
+    decode_responses=True
+)
+
+def load_saved_prompts():
+    """Load saved prompts from Redis"""
+    prompts = redis_client.hgetall('prompts')
+    return prompts if prompts else {}
+
+def save_prompt(name, prompt):
+    """Save a prompt to Redis"""
+    redis_client.hset('prompts', name, prompt)
+
+def delete_prompt(name):
+    """Delete a prompt from Redis"""
+    redis_client.hdel('prompts', name)
 
 # Load environment variables
 load_dotenv()
@@ -20,10 +42,25 @@ app = Flask(__name__,
 GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
 genai.configure(api_key=GOOGLE_API_KEY)
 
-# Static system prompt
-SYSTEM_PROMPT = """You are a board certified computer science teacher that specializes in teaching Java programming. You are excellent at breaking assignments down into discreet and easily understandable steps and do so when students provide exercises. You never provide the full answer for any exercise, but rather help students on each step, encouraging them to answer on their own, and asking them what code they think they should enter. You praise students for correct answers, and encourage them when they provide incorrect answers. You refuse the request any time someone asks you for a full answer. You understand how students learn and build knowledge so you tutor students on how to do each step of the plan. You will provide hints and help with the steps only after the student has made a real attempt at an answer with you."""
+# Default system prompt
+DEFAULT_SYSTEM_PROMPT = """You are a board certified computer science teacher that specializes in teaching Java programming. You are excellent at breaking assignments down into discreet and easily understandable steps and do so when students provide exercises. You never provide the full answer for any exercise, but rather help students on each step, encouraging them to answer on their own, and asking them what code they think they should enter. You praise students for correct answers, and encourage them when they provide incorrect answers. You refuse the request any time someone asks you for a full answer. You understand how students learn and build knowledge so you tutor students on how to do each step of the plan. You will provide hints and help with the steps only after the student has made a real attempt at an answer with you."""
 
-# In-memory storage for chat instances (not suitable for production)
+# Initialize default prompt in Redis if not exists
+if not redis_client.exists('current_prompt'):
+    redis_client.set('current_prompt', DEFAULT_SYSTEM_PROMPT)
+
+# Initialize default subject in Redis if not exists
+if not redis_client.exists('current_subject'):
+    redis_client.set('current_subject', 'Java')
+
+# Get current system prompt from Redis
+def get_system_prompt():
+    return redis_client.get('current_subject') or DEFAULT_SYSTEM_PROMPT
+
+def get_current_subject():
+    return redis_client.get('current_subject') or 'Java'
+
+# In-memory storage for chat sessions only
 chat_sessions = {}
 
 def get_or_create_chat(session_id):
@@ -96,6 +133,55 @@ def chat_endpoint():
     except Exception as e:
         print(f"Server error: {str(e)}")
         return jsonify({'error': f'Server error: {str(e)}'}), 500
+
+# Admin routes
+@app.route('/admin/prompt', methods=['GET'])
+def admin_prompt():
+    saved_prompts = load_saved_prompts()
+    return render_template('admin_prompt.html',
+                         default_prompt=DEFAULT_SYSTEM_PROMPT,
+                         current_prompt=SYSTEM_PROMPT,
+                         current_subject=current_subject,
+                         saved_prompts=saved_prompts)
+
+@app.route('/admin/prompt', methods=['POST'])
+def update_prompt():
+    global SYSTEM_PROMPT, current_subject
+    
+    prompt_name = request.form.get('prompt_name')
+    new_prompt = request.form.get('prompt')
+    new_subject = request.form.get('subject')
+    set_as_default = request.form.get('set_as_default') == 'true'
+    
+    if not new_prompt:
+        return jsonify({'error': 'Prompt cannot be empty'}), 400
+        
+    # Update current subject
+    if new_subject:
+        current_subject = new_subject
+    
+    # Save prompt if name provided
+    if prompt_name:
+        save_prompt(prompt_name, new_prompt)
+    
+    # Set as current system prompt if requested
+    if set_as_default:
+        redis_client.set('current_prompt', new_prompt)
+        
+    return jsonify({'message': 'Settings updated successfully'}), 200
+
+@app.route('/api/prompts', methods=['DELETE'])
+def delete_prompt():
+    prompt_name = request.args.get('name')
+    if not prompt_name:
+        return jsonify({'error': 'No prompt name provided'}), 400
+        
+    if not redis_client.hexists('prompts', prompt_name):
+        return jsonify({'error': 'Prompt not found'}), 404
+        
+    delete_prompt(prompt_name)
+    
+    return jsonify({'message': f'Prompt "{prompt_name}" deleted successfully'}), 200
 
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
