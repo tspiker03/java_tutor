@@ -4,6 +4,9 @@ import sys
 import redis
 from dotenv import load_dotenv
 import google.generativeai as genai
+from flask_jwt_extended import JWTManager, create_access_token, jwt_required, set_access_cookies, unset_jwt_cookies
+from functools import wraps
+from datetime import timedelta
 
 # Initialize Redis with fallback to in-memory storage
 redis_client = None
@@ -70,6 +73,26 @@ app = Flask(__name__,
     static_folder='static/dist',
     static_url_path=''
 )
+
+# JWT Configuration
+app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY', 'your-secret-key')  # Change in production
+app.config['JWT_TOKEN_LOCATION'] = ['cookies']
+app.config['JWT_COOKIE_SECURE'] = False  # Set to True in production
+app.config['JWT_COOKIE_CSRF_PROTECT'] = True
+app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=1)
+
+jwt = JWTManager(app)
+
+# Admin credentials (move to environment variables in production)
+ADMIN_USERNAME = "admin"
+ADMIN_PASSWORD = "password"
+
+def admin_required(fn):
+    @wraps(fn)
+    @jwt_required()
+    def wrapper(*args, **kwargs):
+        return fn(*args, **kwargs)
+    return wrapper
 
 # Configure Gemini API
 GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
@@ -186,7 +209,30 @@ def chat_endpoint():
         return jsonify({'error': f'Server error: {str(e)}'}), 500
 
 # Admin routes
+@app.route('/admin/login', methods=['GET', 'POST'])
+def admin_login():
+    if request.method == 'POST':
+        username = request.form.get('username')
+        password = request.form.get('password')
+        
+        if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
+            access_token = create_access_token(identity=username)
+            response = redirect(url_for('admin_prompt'))
+            set_access_cookies(response, access_token)
+            return response
+        
+        return render_template('admin_login.html', error='Invalid credentials')
+    
+    return render_template('admin_login.html')
+
+@app.route('/admin/logout')
+def admin_logout():
+    response = redirect(url_for('admin_login'))
+    unset_jwt_cookies(response)
+    return response
+
 @app.route('/admin/prompt', methods=['GET'])
+@admin_required
 def admin_prompt():
     saved_prompts = load_saved_prompts()
     return render_template('admin_prompt.html',
@@ -196,6 +242,7 @@ def admin_prompt():
                          saved_prompts=saved_prompts)
 
 @app.route('/admin/prompt', methods=['POST'])
+@admin_required
 def update_prompt():
     global SYSTEM_PROMPT, current_subject
     
@@ -229,6 +276,7 @@ def update_prompt():
     return jsonify({'message': 'Settings updated successfully'}), 200
 
 @app.route('/api/prompts', methods=['DELETE'])
+@admin_required
 def delete_prompt():
     prompt_name = request.args.get('name')
     if not prompt_name:
