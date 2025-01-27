@@ -4,12 +4,29 @@ const ChatComponent = () => {
     const [messages, setMessages] = useState([]);
     const [input, setInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
+    const [sessionId, setSessionId] = useState('');
     const messagesEndRef = useRef(null);
-    const sessionId = useRef(Math.random().toString(36).substring(2));
 
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     };
+
+    useEffect(() => {
+        // Generate new sessionId when component mounts (page loads/refreshes)
+        setSessionId(Math.random().toString(36).substring(2));
+
+        // Listen for storage events (chat reset)
+        const handleStorageChange = (e) => {
+            if (e.key === 'chatHistory' && e.newValue === null) {
+                setMessages([]);
+                setInput('');
+                setSessionId(Math.random().toString(36).substring(2));
+            }
+        };
+
+        window.addEventListener('storage', handleStorageChange);
+        return () => window.removeEventListener('storage', handleStorageChange);
+    }, []); // Empty dependency array means this runs once on mount
 
     useEffect(() => {
         scrollToBottom();
@@ -35,42 +52,52 @@ const ChatComponent = () => {
 
         const userMessage = input.trim();
         setInput('');
-        
-        // Add user message to chat
-        setMessages(prev => [...prev, { role: 'user', content: userMessage }]);
-        
         setIsLoading(true);
+
+        console.log('Sending message:', userMessage);
+        console.log('Session ID:', sessionId);
+
         try {
-            const response = await fetch('/.netlify/functions/chat', {
+            // Add user message to chat
+            setMessages(prev => [...prev, { role: 'user', content: userMessage }]);
+
+            const response = await fetch('/api/chat', {
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/json'
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
                 },
                 body: JSON.stringify({
                     message: userMessage,
-                    sessionId: sessionId.current,
-                    history: messages
+                    sessionId: sessionId
                 })
             });
 
+            console.log('Response status:', response.status);
+            const contentType = response.headers.get('Content-Type');
+            console.log('Response content type:', contentType);
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.error('Error response:', errorText);
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
             const data = await response.json();
+            console.log('Received response:', data);
             
             if (data.error) {
                 throw new Error(data.error);
             }
 
-            // Update messages with the response and history
-            if (data.history) {
-                setMessages(data.history);
-            } else {
-                setMessages(prev => [...prev, { role: 'assistant', content: data.response }]);
-            }
+            // Add assistant's response to chat
+            setMessages(prev => [...prev, { role: 'assistant', content: data.response }]);
 
         } catch (error) {
-            console.error('Error:', error);
+            console.error('Error details:', error);
             setMessages(prev => [...prev, {
                 role: 'assistant',
-                content: 'Sorry, there was an error processing your message.'
+                content: `Sorry, there was an error processing your message: ${error.message}`
             }]);
         } finally {
             setIsLoading(false);
@@ -104,7 +131,7 @@ const ChatComponent = () => {
                             handleSubmit(e);
                         }
                     }}
-                    placeholder="Type your message here..."
+                    placeholder="Ask your programming question here..."
                     disabled={isLoading}
                 />
                 <button type="submit" disabled={isLoading}>

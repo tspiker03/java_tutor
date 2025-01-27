@@ -1,172 +1,329 @@
-from flask import Flask, render_template, request, jsonify, Response, stream_with_context, send_from_directory, redirect, url_for
+from flask import Flask, render_template, request, jsonify, Response, stream_with_context, send_from_directory
+from flask_cors import CORS
 import os
 import sys
-import redis
+import subprocess
 from dotenv import load_dotenv
 import google.generativeai as genai
-from flask_jwt_extended import JWTManager, create_access_token, jwt_required, set_access_cookies, unset_jwt_cookies, verify_jwt_in_request
+import traceback
+import json
+from datetime import datetime, timedelta
 from functools import wraps
-from datetime import timedelta
-
-# Initialize Redis with fallback to in-memory storage
-redis_client = None
-in_memory_prompts = {}
-in_memory_current_prompt = DEFAULT_SYSTEM_PROMPT = """You are a board certified computer science teacher that specializes in teaching Java programming. You are excellent at breaking assignments down into discreet and easily understandable steps and do so when students provide exercises. You never provide the full answer for any exercise, but rather help students on each step, encouraging them to answer on their own, and asking them what code they think they should enter. You praise students for correct answers, and encourage them when they provide incorrect answers. You refuse the request any time someone asks you for a full answer. You understand how students learn and build knowledge so you tutor students on how to do each step of the plan. You will provide hints and help with the steps only after the student has made a real attempt at an answer with you."""
-in_memory_current_subject = "Java"
 
 # Load environment variables
 load_dotenv()
 
-try:
-    redis_url = os.getenv('REDIS_URL')  # Railway provides Redis URL
-    if redis_url:
-        redis_client = redis.from_url(redis_url, decode_responses=True)
-    else:
-        redis_client = redis.Redis(
-            host=os.getenv('REDIS_HOST', 'localhost'),
-            port=int(os.getenv('REDIS_PORT', 6379)),
-            db=int(os.getenv('REDIS_DB', 0)),
-            decode_responses=True
-        )
-    # Test connection
-    redis_client.ping()
-    print("Successfully connected to Redis")
-except (redis.ConnectionError, redis.ResponseError) as e:
-    print(f"Redis connection failed, falling back to in-memory storage: {str(e)}")
-    redis_client = None
-
-def load_saved_prompts():
-    """Load saved prompts from Redis or memory"""
-    if redis_client:
-        try:
-            prompts = redis_client.hgetall('prompts')
-            print(f"Loaded prompts from Redis: {prompts}")
-            return prompts if prompts else {}
-        except Exception as e:
-            print(f"Error loading prompts from Redis: {str(e)}")
-            print(f"Falling back to in-memory prompts: {in_memory_prompts}")
-            return in_memory_prompts
-    print(f"Using in-memory prompts: {in_memory_prompts}")
-    return in_memory_prompts
-
-def save_prompt(name, prompt):
-    """Save a prompt to Redis or memory"""
-    global in_memory_prompts
-    if redis_client:
-        try:
-            redis_client.hset('prompts', name, prompt)
-            print(f"Saved prompt '{name}' to Redis")
-        except Exception as e:
-            print(f"Error saving prompt to Redis: {str(e)}")
-            in_memory_prompts[name] = prompt
-            print(f"Saved prompt '{name}' to memory")
-    else:
-        in_memory_prompts[name] = prompt
-        print(f"Saved prompt '{name}' to memory")
-
-def delete_prompt(name):
-    """Delete a prompt from Redis or memory"""
-    global in_memory_prompts
-    if redis_client:
-        try:
-            redis_client.hdel('prompts', name)
-            print(f"Deleted prompt '{name}' from Redis")
-        except Exception as e:
-            print(f"Error deleting prompt from Redis: {str(e)}")
-            in_memory_prompts.pop(name, None)
-            print(f"Deleted prompt '{name}' from memory")
-    else:
-        in_memory_prompts.pop(name, None)
-        print(f"Deleted prompt '{name}' from memory")
-
-print(f"Java executable: {sys.executable}")
-print(f"Java path: {sys.path}")
+print(f"Python executable: {sys.executable}")
+print(f"Python path: {sys.path}")
 
 app = Flask(__name__, 
     template_folder='templates',
     static_folder='static/dist',
     static_url_path=''
 )
+CORS(app)
 
-# JWT Configuration
-app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY', 'your-secret-key')  # Change in production
-app.config['JWT_TOKEN_LOCATION'] = ['cookies']
-app.config['JWT_COOKIE_SECURE'] = False  # Set to True in production
-app.config['JWT_COOKIE_CSRF_PROTECT'] = True
-app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=1)
-
-jwt = JWTManager(app)
-
-# Admin credentials (move to environment variables in production)
-ADMIN_USERNAME = "admin"
-ADMIN_PASSWORD = "password"
-
-def admin_required(fn):
-    @wraps(fn)
-    def wrapper(*args, **kwargs):
-        try:
-            # Verify JWT token
-            verify_jwt_in_request()
-            return fn(*args, **kwargs)
-        except:
-            # Redirect to login if no valid token
-            return redirect(url_for('admin_login'))
-    return wrapper
+# Try to initialize Redis if available
+try:
+    import redis
+    REDIS_URL = os.getenv('REDIS_URL')
+    if REDIS_URL:
+        redis_client = redis.from_url(REDIS_URL)
+        print("Successfully connected to Redis")
+        USE_REDIS = True
+    else:
+        print("No REDIS_URL provided, falling back to in-memory storage")
+        USE_REDIS = False
+except Exception as e:
+    print(f"Failed to connect to Redis, falling back to in-memory storage: {str(e)}")
+    USE_REDIS = False
 
 # Configure Gemini API
 GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
+if not GOOGLE_API_KEY:
+    raise ValueError("GOOGLE_API_KEY environment variable is required")
+
 genai.configure(api_key=GOOGLE_API_KEY)
 
+# Load default system prompt and subject from file
+with open('optimized_prompt.txt', 'r') as file:
+    DEFAULT_SYSTEM_PROMPT = file.read().strip()
+
+# Default subject
+DEFAULT_SUBJECT = "Python"
+
+# Admin credentials
+ADMIN_USERNAME = os.getenv('ADMIN_USERNAME', 'admin')
+ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', 'password')
+
+# In-memory storage for non-Redis environments
+in_memory_storage = {
+    'system_prompt': None,
+    'subject': None,
+    'saved_prompts': {}  # Format: {name: prompt_text}
+}
+
+def get_saved_prompts():
+    """Get all saved prompts"""
+    try:
+        if USE_REDIS:
+            prompts = redis_client.hgetall('saved_prompts')
+            return {k.decode('utf-8'): v.decode('utf-8') for k, v in prompts.items()}
+        return in_memory_storage['saved_prompts']
+    except Exception as e:
+        print(f"Error getting saved prompts: {str(e)}")
+        return {}
+
+def save_prompt(name, prompt):
+    """Save a prompt with a name"""
+    try:
+        if USE_REDIS:
+            redis_client.hset('saved_prompts', name, prompt)
+        else:
+            in_memory_storage['saved_prompts'][name] = prompt
+        return True
+    except Exception as e:
+        print(f"Error saving prompt: {str(e)}")
+        return False
+
+def delete_prompt(name):
+    """Delete a saved prompt"""
+    try:
+        if USE_REDIS:
+            redis_client.hdel('saved_prompts', name)
+        else:
+            if name in in_memory_storage['saved_prompts']:
+                del in_memory_storage['saved_prompts'][name]
+        return True
+    except Exception as e:
+        print(f"Error deleting prompt: {str(e)}")
+        return False
+
+def rebuild_frontend():
+    """Rebuild the frontend using webpack"""
+    try:
+        # Get the current working directory
+        cwd = os.getcwd()
+        print(f"Current working directory: {cwd}")
+        
+        # List files in current directory
+        print("Files in current directory:")
+        for file in os.listdir(cwd):
+            print(f"- {file}")
+        
+        # Check if package.json exists
+        if not os.path.exists('package.json'):
+            print("Error: package.json not found")
+            return False
+            
+        # Run npm build with explicit error output
+        result = subprocess.run(
+            ['npm', 'run', 'build'],
+            capture_output=True,
+            text=True,
+            check=False
+        )
+        
+        # Log the output
+        print("Build output:")
+        print(result.stdout)
+        if result.stderr:
+            print("Build errors:")
+            print(result.stderr)
+            
+        # Check if build was successful
+        if result.returncode != 0:
+            print(f"Build failed with return code: {result.returncode}")
+            return False
+            
+        return True
+    except Exception as e:
+        print(f"Error rebuilding frontend: {str(e)}")
+        traceback.print_exc()
+        return False
+
 def get_system_prompt():
-    """Get current system prompt from Redis or memory"""
-    global in_memory_current_prompt
-    if redis_client:
-        try:
-            prompt = redis_client.get('current_prompt')
+    """Get system prompt from Redis/memory or fallback to default"""
+    try:
+        if USE_REDIS:
+            prompt = redis_client.get('system_prompt')
             if prompt:
-                print(f"Got current prompt from Redis")
-                return prompt
-            print(f"No current prompt in Redis, using default")
-            return DEFAULT_SYSTEM_PROMPT
-        except Exception as e:
-            print(f"Error getting prompt from Redis: {str(e)}")
-            print(f"Using in-memory prompt: {in_memory_current_prompt}")
-            return in_memory_current_prompt or DEFAULT_SYSTEM_PROMPT
-    print(f"Using in-memory prompt: {in_memory_current_prompt}")
-    return in_memory_current_prompt or DEFAULT_SYSTEM_PROMPT
+                return prompt.decode('utf-8')
+        elif in_memory_storage['system_prompt']:
+            return in_memory_storage['system_prompt']
+        return DEFAULT_SYSTEM_PROMPT
+    except Exception as e:
+        print(f"Error getting system prompt: {str(e)}")
+        return DEFAULT_SYSTEM_PROMPT
 
-def get_current_subject():
-    """Get current subject from Redis or memory"""
-    global in_memory_current_subject
-    if redis_client:
-        try:
-            subject = redis_client.get('current_subject')
+def get_subject():
+    """Get subject from Redis/memory or fallback to default"""
+    try:
+        if USE_REDIS:
+            subject = redis_client.get('subject')
             if subject:
-                print(f"Got current subject from Redis: {subject}")
-                return subject
-            print(f"No current subject in Redis, using default")
-            return 'Java'
-        except Exception as e:
-            print(f"Error getting subject from Redis: {str(e)}")
-            print(f"Using in-memory subject: {in_memory_current_subject}")
-            return in_memory_current_subject
-    print(f"Using in-memory subject: {in_memory_current_subject}")
-    return in_memory_current_subject
+                return subject.decode('utf-8')
+        elif in_memory_storage['subject']:
+            return in_memory_storage['subject']
+        return DEFAULT_SUBJECT
+    except Exception as e:
+        print(f"Error getting subject: {str(e)}")
+        return DEFAULT_SUBJECT
 
-# In-memory storage for chat sessions only
+def set_system_prompt(prompt, set_as_default=False):
+    """Set system prompt in Redis/memory and optionally as default"""
+    try:
+        if set_as_default:
+            # Write to optimized_prompt.txt
+            with open('optimized_prompt.txt', 'w') as file:
+                file.write(prompt)
+        
+        if USE_REDIS:
+            redis_client.set('system_prompt', prompt)
+        else:
+            in_memory_storage['system_prompt'] = prompt
+        return True
+    except Exception as e:
+        print(f"Error setting system prompt: {str(e)}")
+        return False
+
+def set_subject(subject):
+    """Set subject in Redis/memory and trigger rebuild"""
+    try:
+        # First store the subject
+        if USE_REDIS:
+            redis_client.set('subject', subject)
+        else:
+            in_memory_storage['subject'] = subject
+        
+        # Attempt rebuild but don't fail if it doesn't work
+        # This allows subject changes to work even if rebuild fails
+        try:
+            rebuild_success = rebuild_frontend()
+            if not rebuild_success:
+                print("Warning: Frontend rebuild failed but subject was updated")
+        except Exception as rebuild_error:
+            print(f"Warning: Frontend rebuild error: {str(rebuild_error)}")
+            traceback.print_exc()
+        
+        return True
+    except Exception as e:
+        print(f"Error setting subject: {str(e)}")
+        return False
+
+def check_auth(username, password):
+    """Check if username and password are valid"""
+    return username == ADMIN_USERNAME and password == ADMIN_PASSWORD
+
+def requires_auth(f):
+    """Decorator for requiring HTTP Basic auth"""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        auth = request.authorization
+        if not auth or not check_auth(auth.username, auth.password):
+            return Response(
+                'Could not verify your access level for that URL.\n'
+                'You have to login with proper credentials', 401,
+                {'WWW-Authenticate': 'Basic realm="Login Required"'})
+        return f(*args, **kwargs)
+    return decorated
+
+# In-memory storage fallback
 chat_sessions = {}
+
+class ChatSession:
+    def __init__(self, session_id):
+        self.session_id = session_id
+        self.model = genai.GenerativeModel("gemini-2.0-flash-thinking-exp")
+        system_prompt = get_system_prompt()
+        subject = get_subject()
+        self.history = [
+            {"role": "user", "parts": [system_prompt]},
+            {"role": "model", "parts": [f"Understood. I will act as a teacher specializing in {subject}, helping students learn step by step while encouraging their own problem-solving abilities."]}
+        ]
+        self.last_accessed = datetime.utcnow()
+
+    def to_dict(self):
+        return {
+            'history': self.history,
+            'last_accessed': self.last_accessed.isoformat()
+        }
+
+    @classmethod
+    def from_dict(cls, session_id, data):
+        session = cls(session_id)
+        session.history = data['history']
+        session.last_accessed = datetime.fromisoformat(data['last_accessed'])
+        return session
 
 def get_or_create_chat(session_id):
     """Get existing chat or create new one with system prompt"""
-    if session_id not in chat_sessions:
-        model = genai.GenerativeModel("gemini-2.0-flash-thinking-exp-1219")
-        current_prompt = get_system_prompt()
-        chat = model.start_chat(history=[
-            {"role": "user", "parts": [current_prompt]},
-            {"role": "model", "parts": ["Understood. I will act as a teacher following the specified guidelines to help students learn effectively."]}
-        ])
-        chat_sessions[session_id] = chat
-    return chat_sessions[session_id]
+    try:
+        chat_session = None
+        
+        if USE_REDIS:
+            # Try to get existing session from Redis
+            session_data = redis_client.get(f"chat_session:{session_id}")
+            if session_data:
+                session_dict = json.loads(session_data)
+                chat_session = ChatSession.from_dict(session_id, session_dict)
+        else:
+            # Use in-memory storage
+            if session_id in chat_sessions:
+                chat_session = chat_sessions[session_id]
+                
+        if not chat_session:
+            # Create new session
+            print(f"Creating new chat session for {session_id}")
+            chat_session = ChatSession(session_id)
+            
+            if USE_REDIS:
+                # Save to Redis
+                redis_client.set(
+                    f"chat_session:{session_id}",
+                    json.dumps(chat_session.to_dict())
+                )
+            else:
+                # Save to in-memory
+                chat_sessions[session_id] = chat_session
+
+        # Update last accessed time
+        chat_session.last_accessed = datetime.utcnow()
+
+        # Initialize chat with current history
+        model = genai.GenerativeModel("gemini-2.0-flash-thinking-exp")
+        chat = model.start_chat(history=chat_session.history)
+        
+        return chat, chat_session
+
+    except Exception as e:
+        print(f"Error in get_or_create_chat: {str(e)}")
+        traceback.print_exc()
+        raise
+
+def cleanup_old_sessions():
+    """Remove expired sessions"""
+    try:
+        if USE_REDIS:
+            pattern = "chat_session:*"
+            for key in redis_client.scan_iter(match=pattern):
+                session_data = redis_client.get(key)
+                if session_data:
+                    session_dict = json.loads(session_data)
+                    last_accessed = datetime.fromisoformat(session_dict['last_accessed'])
+                    if datetime.utcnow() - last_accessed > timedelta(hours=24):
+                        redis_client.delete(key)
+        else:
+            # Cleanup in-memory sessions
+            current_time = datetime.utcnow()
+            expired_sessions = [
+                session_id for session_id, session in chat_sessions.items()
+                if current_time - session.last_accessed > timedelta(hours=24)
+            ]
+            for session_id in expired_sessions:
+                del chat_sessions[session_id]
+    except Exception as e:
+        print(f"Error in cleanup_old_sessions: {str(e)}")
 
 # Routes
 @app.route('/', defaults={'path': ''})
@@ -176,166 +333,172 @@ def serve(path):
         return send_from_directory(app.static_folder, path)
     return render_template('chat.html')
 
-def generate_response(chat, message):
-    """Generate streaming response from chat"""
+@app.route('/api/rebuild', methods=['POST'])
+@requires_auth
+def rebuild_endpoint():
+    """Endpoint to manually trigger frontend rebuild"""
     try:
-        response = chat.send_message(message, stream=True)
-        accumulated_response = []
-        
-        for chunk in response:
-            if chunk.text:
-                accumulated_response.append(chunk.text)
-                # Yield each chunk for streaming
-                yield f"data: {chunk.text}\n\n"
-        
-        # Store the complete response for history
-        return "".join(accumulated_response)
+        if rebuild_frontend():
+            return jsonify({'status': 'success', 'message': 'Frontend rebuilt successfully'})
+        return jsonify({'status': 'error', 'message': 'Failed to rebuild frontend'}), 500
     except Exception as e:
-        print(f"Error generating response: {str(e)}")
-        yield f"data: Error: {str(e)}\n\n"
-        return str(e)
+        print(f"Error in rebuild endpoint: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/subject', methods=['GET'])
+def get_subject_endpoint():
+    """Get current subject"""
+    try:
+        subject = get_subject()
+        return jsonify({'subject': subject})
+    except Exception as e:
+        print(f"Error getting subject: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/prompts', methods=['GET', 'POST', 'DELETE'])
+@requires_auth
+def manage_prompts():
+    """Endpoint to manage saved prompts"""
+    try:
+        if request.method == 'GET':
+            prompts = get_saved_prompts()
+            return jsonify(prompts)
+        
+        elif request.method == 'POST':
+            data = request.get_json()
+            name = data.get('name')
+            prompt = data.get('prompt')
+            
+            if not name or not prompt:
+                return jsonify({'error': 'Name and prompt are required'}), 400
+                
+            if save_prompt(name, prompt):
+                return jsonify({'status': 'success', 'message': f'Prompt "{name}" saved successfully'})
+            return jsonify({'error': 'Failed to save prompt'}), 500
+            
+        elif request.method == 'DELETE':
+            name = request.args.get('name')
+            if not name:
+                return jsonify({'error': 'Prompt name is required'}), 400
+                
+            if delete_prompt(name):
+                return jsonify({'status': 'success', 'message': f'Prompt "{name}" deleted successfully'})
+            return jsonify({'error': 'Failed to delete prompt'}), 500
+            
+    except Exception as e:
+        print(f"Error managing prompts: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/admin/prompt', methods=['GET', 'POST'])
+@requires_auth
+def admin_prompt():
+    if request.method == 'GET':
+        current_prompt = get_system_prompt()
+        current_subject = get_subject()
+        saved_prompts = get_saved_prompts()
+        return render_template('admin_prompt.html', 
+                             current_prompt=current_prompt,
+                             default_prompt=DEFAULT_SYSTEM_PROMPT,
+                             current_subject=current_subject,
+                             saved_prompts=saved_prompts)
+    else:
+        new_prompt = request.form.get('prompt')
+        new_subject = request.form.get('subject')
+        set_as_default = request.form.get('set_as_default') == 'true'
+        prompt_name = request.form.get('prompt_name')
+        
+        success = True
+        message = []
+        
+        if new_prompt:
+            if set_system_prompt(new_prompt, set_as_default):
+                message.append('Prompt updated successfully')
+                if prompt_name:  # If a name was provided, also save it to saved prompts
+                    if save_prompt(prompt_name, new_prompt):
+                        message.append(f'Prompt saved as "{prompt_name}"')
+                    else:
+                        success = False
+                        message.append(f'Failed to save prompt as "{prompt_name}"')
+            else:
+                success = False
+                message.append('Failed to update prompt')
+        
+        if new_subject:
+            if set_subject(new_subject):
+                message.append('Subject updated successfully')
+            else:
+                success = False
+                message.append('Failed to update subject')
+        
+        if not (new_prompt or new_subject):
+            return jsonify({'status': 'error', 'message': 'No updates provided'}), 400
+            
+        return jsonify({
+            'status': 'success' if success else 'error',
+            'message': ' and '.join(message)
+        }), 200 if success else 500
 
 @app.route('/api/chat', methods=['POST'])
 def chat_endpoint():
     try:
+        print("Received chat request")
         data = request.get_json()
+        print(f"Request data: {data}")
+        
         user_input = data.get('message')
         session_id = data.get('sessionId')
 
         if not session_id:
+            print("Error: No sessionId provided")
             return jsonify({'error': 'No sessionId provided'}), 400
 
         if not user_input:
+            print("Error: No message provided")
             return jsonify({'error': 'No message provided'}), 400
 
         # Get or create chat instance for this session
-        chat = get_or_create_chat(session_id)
+        try:
+            chat, chat_session = get_or_create_chat(session_id)
+        except Exception as e:
+            print(f"Error getting/creating chat: {str(e)}")
+            return jsonify({'error': f'Failed to initialize chat: {str(e)}'}), 500
 
-        def generate():
-            response_text = yield from generate_response(chat, user_input)
-            
-            # After generating response, you can access chat history
-            print(f"Chat history for session {session_id}:")
-            for message in chat.history:
-                print(f"{message['role']}: {message['parts']}")
+        # Send message and get response
+        print(f"Sending message to Gemini: {user_input}")
+        try:
+            response = chat.send_message(user_input)
+            response_text = response.text
+            print(f"Received response from Gemini: {response_text}")
 
-        return Response(
-            stream_with_context(generate()),
-            mimetype='text/event-stream'
-        )
+            # Update history
+            chat_session.history.append({"role": "user", "parts": [user_input]})
+            chat_session.history.append({"role": "model", "parts": [response_text]})
+
+            # Save updated session
+            if USE_REDIS:
+                redis_client.set(
+                    f"chat_session:{session_id}",
+                    json.dumps(chat_session.to_dict())
+                )
+            else:
+                chat_sessions[session_id] = chat_session
+
+        except Exception as e:
+            print(f"Error sending message to Gemini: {str(e)}")
+            traceback.print_exc()
+            return jsonify({'error': f'Failed to get response from Gemini: {str(e)}'}), 500
+
+        # Clean up old sessions periodically
+        cleanup_old_sessions()
+
+        return jsonify({'response': response_text})
 
     except Exception as e:
         print(f"Server error: {str(e)}")
+        print("Traceback:")
+        traceback.print_exc()
         return jsonify({'error': f'Server error: {str(e)}'}), 500
 
-# Admin routes
-@app.route('/admin/login', methods=['GET', 'POST'])
-def admin_login():
-    if request.method == 'POST':
-        username = request.form.get('username')
-        password = request.form.get('password')
-        
-        if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
-            access_token = create_access_token(identity=username)
-            response = redirect(url_for('admin_prompt'))
-            set_access_cookies(response, access_token)
-            return response
-        
-        return render_template('admin_login.html', error='Invalid credentials')
-    
-    return render_template('admin_login.html')
-
-@app.route('/admin/logout')
-def admin_logout():
-    response = redirect(url_for('admin_login'))
-    unset_jwt_cookies(response)
-    return response
-
-@app.route('/admin/prompt', methods=['GET'])
-@admin_required
-def admin_prompt():
-    saved_prompts = load_saved_prompts()
-    current_prompt = get_system_prompt()
-    print(f"Current prompt in admin_prompt: {current_prompt}")
-    return render_template('admin_prompt.html',
-                         default_prompt=DEFAULT_SYSTEM_PROMPT,
-                         current_prompt=current_prompt,
-                         current_subject=get_current_subject(),
-                         saved_prompts=saved_prompts)
-
-@app.route('/admin/prompt', methods=['POST'])
-@admin_required
-def update_prompt():
-    try:
-        global in_memory_current_prompt, in_memory_current_subject
-        
-        prompt_name = request.form.get('prompt_name')
-        new_prompt = request.form.get('prompt')
-        new_subject = request.form.get('subject')
-        set_as_default = request.form.get('set_as_default') == 'true'
-        
-        print(f"Received update request:")
-        print(f"prompt_name: {prompt_name}")
-        print(f"new_prompt: {new_prompt}")
-        print(f"new_subject: {new_subject}")
-        print(f"set_as_default: {set_as_default}")
-        
-        if not new_prompt:
-            return jsonify({'error': 'Prompt cannot be empty'}), 400
-            
-        # Update current subject
-        if new_subject:
-            print(f"New subject: {new_subject}")
-            if redis_client:
-                try:
-                    redis_client.set('current_subject', new_subject)
-                    print(f"Updated subject in Redis to: {new_subject}")
-                except Exception as e:
-                    print(f"Error updating subject in Redis: {str(e)}")
-                    in_memory_current_subject = new_subject
-                    print(f"Updated subject in memory to: {new_subject}")
-            else:
-                in_memory_current_subject = new_subject
-                print(f"Updated subject in memory to: {new_subject}")
-        
-        # Save prompt if name provided
-        if prompt_name:
-            save_prompt(prompt_name, new_prompt)
-        
-        # Set as current system prompt if requested
-        if set_as_default:
-            if redis_client:
-                try:
-                    redis_client.set('current_prompt', new_prompt)
-                    print(f"Updated current prompt in Redis")
-                except Exception as e:
-                    print(f"Error updating current prompt in Redis: {str(e)}")
-                    in_memory_current_prompt = new_prompt
-                    print(f"Updated current prompt in memory")
-            else:
-                in_memory_current_prompt = new_prompt
-                print(f"Updated current prompt in memory")
-            
-        return jsonify({'message': 'Settings updated successfully'}), 200
-    except Exception as e:
-        print(f"Error in update_prompt: {str(e)}")
-        return jsonify({'error': f'An error occurred: {str(e)}'}), 500
-
-@app.route('/api/prompts', methods=['DELETE'])
-@admin_required
-def delete_prompt():
-    prompt_name = request.args.get('name')
-    if not prompt_name:
-        return jsonify({'error': 'No prompt name provided'}), 400
-        
-    saved_prompts = load_saved_prompts()
-    if prompt_name not in saved_prompts:
-        return jsonify({'error': 'Prompt not found'}), 404
-        
-    delete_prompt(prompt_name)
-    
-    return jsonify({'message': f'Prompt "{prompt_name}" deleted successfully'}), 200
-
 if __name__ == '__main__':
-    port = int(os.getenv('PORT', 5000))
-    app.run(host='0.0.0.0', port=port)
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)

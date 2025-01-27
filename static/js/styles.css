@@ -17,24 +17,24 @@ body {
 }
 
 .instructions {
-    width: 300px;
+    width: 400px;
     padding: 20px;
     background: white;
     box-shadow: 2px 0 4px rgba(0,0,0,0.1);
     overflow-y: auto;
 }
 
-.instructions h2 {
-    margin-bottom: 15px;
+.instructions {
+    white-space: pre-wrap;
+    font-size: 0.95rem;
+    line-height: 1.5;
+}
+
+.instructions .title {
     color: #007bff;
-}
-
-.instructions ol {
-    padding-left: 20px;
-}
-
-.instructions li {
-    margin-bottom: 15px;
+    font-size: 1.3rem;
+    margin-bottom: 20px;
+    font-weight: bold;
 }
 
 .chat-interface {

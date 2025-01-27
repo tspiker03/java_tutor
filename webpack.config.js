@@ -3,7 +3,7 @@ const path = require('path');
 module.exports = {
     entry: path.resolve(__dirname, 'static/js/App.jsx'),
     output: {
-        path: path.resolve(__dirname, 'public'),
+        path: path.resolve(__dirname, 'static/dist'),
         filename: 'bundle.js',
         publicPath: '/'
     },
@@ -30,12 +30,13 @@ module.exports = {
     },
     devServer: {
         static: {
-            directory: path.join(__dirname, 'public'),
+            directory: path.join(__dirname, 'static/dist'),
         },
         proxy: {
             '/api': {
-                target: '/.netlify/functions',
-                pathRewrite: { '^/api': '' }
+                target: 'http://localhost:5000',
+                secure: false,
+                changeOrigin: true
             }
         },
         port: 3000,
