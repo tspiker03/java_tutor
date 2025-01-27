@@ -133,9 +133,13 @@ def get_current_subject():
     """Get current subject from Redis or memory"""
     if redis_client:
         try:
-            return redis_client.get('current_subject') or 'Java'
+            subject = redis_client.get('current_subject') or 'Java'
+            print(f"Current subject from Redis: {subject}")
+            return subject
         except:
+            print(f"Current subject from in-memory: {in_memory_current_subject}")
             return in_memory_current_subject
+    print(f"Current subject from in-memory: {in_memory_current_subject}")
     return in_memory_current_subject
 
 # In-memory storage for chat sessions only
@@ -261,7 +265,7 @@ def update_prompt():
         
     # Update current subject
     if new_subject:
-        current_subject = new_subject
+        print(f"New subject: {new_subject}")
         if redis_client:
             try:
                 redis_client.set('current_subject', new_subject)
@@ -275,7 +279,6 @@ def update_prompt():
         save_prompt(prompt_name, new_prompt)
     
     # Set as current system prompt if requested
-    global in_memory_current_prompt
     if set_as_default:
         if redis_client:
             try:
