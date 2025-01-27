@@ -11,8 +11,11 @@ from datetime import timedelta
 # Initialize Redis with fallback to in-memory storage
 redis_client = None
 in_memory_prompts = {}
-in_memory_current_prompt = None
+in_memory_current_prompt = DEFAULT_SYSTEM_PROMPT = """You are a board certified computer science teacher that specializes in teaching Java programming. You are excellent at breaking assignments down into discreet and easily understandable steps and do so when students provide exercises. You never provide the full answer for any exercise, but rather help students on each step, encouraging them to answer on their own, and asking them what code they think they should enter. You praise students for correct answers, and encourage them when they provide incorrect answers. You refuse the request any time someone asks you for a full answer. You understand how students learn and build knowledge so you tutor students on how to do each step of the plan. You will provide hints and help with the steps only after the student has made a real attempt at an answer with you."""
 in_memory_current_subject = "Java"
+
+# Load environment variables
+load_dotenv()
 
 try:
     redis_url = os.getenv('REDIS_URL')  # Railway provides Redis URL
@@ -37,33 +40,44 @@ def load_saved_prompts():
     if redis_client:
         try:
             prompts = redis_client.hgetall('prompts')
+            print(f"Loaded prompts from Redis: {prompts}")
             return prompts if prompts else {}
-        except:
+        except Exception as e:
+            print(f"Error loading prompts from Redis: {str(e)}")
+            print(f"Falling back to in-memory prompts: {in_memory_prompts}")
             return in_memory_prompts
+    print(f"Using in-memory prompts: {in_memory_prompts}")
     return in_memory_prompts
 
 def save_prompt(name, prompt):
     """Save a prompt to Redis or memory"""
+    global in_memory_prompts
     if redis_client:
         try:
             redis_client.hset('prompts', name, prompt)
-        except:
+            print(f"Saved prompt '{name}' to Redis")
+        except Exception as e:
+            print(f"Error saving prompt to Redis: {str(e)}")
             in_memory_prompts[name] = prompt
+            print(f"Saved prompt '{name}' to memory")
     else:
         in_memory_prompts[name] = prompt
+        print(f"Saved prompt '{name}' to memory")
 
 def delete_prompt(name):
     """Delete a prompt from Redis or memory"""
+    global in_memory_prompts
     if redis_client:
         try:
             redis_client.hdel('prompts', name)
-        except:
+            print(f"Deleted prompt '{name}' from Redis")
+        except Exception as e:
+            print(f"Error deleting prompt from Redis: {str(e)}")
             in_memory_prompts.pop(name, None)
+            print(f"Deleted prompt '{name}' from memory")
     else:
         in_memory_prompts.pop(name, None)
-
-# Load environment variables
-load_dotenv()
+        print(f"Deleted prompt '{name}' from memory")
 
 print(f"Java executable: {sys.executable}")
 print(f"Java path: {sys.path}")
@@ -103,43 +117,40 @@ def admin_required(fn):
 GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
 genai.configure(api_key=GOOGLE_API_KEY)
 
-# Default system prompt
-DEFAULT_SYSTEM_PROMPT = """You are a board certified computer science teacher that specializes in teaching Java programming. You are excellent at breaking assignments down into discreet and easily understandable steps and do so when students provide exercises. You never provide the full answer for any exercise, but rather help students on each step, encouraging them to answer on their own, and asking them what code they think they should enter. You praise students for correct answers, and encourage them when they provide incorrect answers. You refuse the request any time someone asks you for a full answer. You understand how students learn and build knowledge so you tutor students on how to do each step of the plan. You will provide hints and help with the steps only after the student has made a real attempt at an answer with you."""
-
-# Initialize storage
-if redis_client:
-    try:
-        if not redis_client.exists('current_prompt'):
-            redis_client.set('current_prompt', DEFAULT_SYSTEM_PROMPT)
-        if not redis_client.exists('current_subject'):
-            redis_client.set('current_subject', 'Java')
-    except:
-        in_memory_current_prompt = DEFAULT_SYSTEM_PROMPT
-        in_memory_current_subject = 'Java'
-else:
-    in_memory_current_prompt = DEFAULT_SYSTEM_PROMPT
-    in_memory_current_subject = 'Java'
-
 def get_system_prompt():
     """Get current system prompt from Redis or memory"""
+    global in_memory_current_prompt
     if redis_client:
         try:
-            return redis_client.get('current_prompt') or DEFAULT_SYSTEM_PROMPT
-        except:
+            prompt = redis_client.get('current_prompt')
+            if prompt:
+                print(f"Got current prompt from Redis")
+                return prompt
+            print(f"No current prompt in Redis, using default")
+            return DEFAULT_SYSTEM_PROMPT
+        except Exception as e:
+            print(f"Error getting prompt from Redis: {str(e)}")
+            print(f"Using in-memory prompt: {in_memory_current_prompt}")
             return in_memory_current_prompt or DEFAULT_SYSTEM_PROMPT
+    print(f"Using in-memory prompt: {in_memory_current_prompt}")
     return in_memory_current_prompt or DEFAULT_SYSTEM_PROMPT
 
 def get_current_subject():
     """Get current subject from Redis or memory"""
+    global in_memory_current_subject
     if redis_client:
         try:
-            subject = redis_client.get('current_subject') or 'Java'
-            print(f"Current subject from Redis: {subject}")
-            return subject
-        except:
-            print(f"Current subject from in-memory: {in_memory_current_subject}")
+            subject = redis_client.get('current_subject')
+            if subject:
+                print(f"Got current subject from Redis: {subject}")
+                return subject
+            print(f"No current subject in Redis, using default")
+            return 'Java'
+        except Exception as e:
+            print(f"Error getting subject from Redis: {str(e)}")
+            print(f"Using in-memory subject: {in_memory_current_subject}")
             return in_memory_current_subject
-    print(f"Current subject from in-memory: {in_memory_current_subject}")
+    print(f"Using in-memory subject: {in_memory_current_subject}")
     return in_memory_current_subject
 
 # In-memory storage for chat sessions only
@@ -244,51 +255,71 @@ def admin_logout():
 @admin_required
 def admin_prompt():
     saved_prompts = load_saved_prompts()
+    current_prompt = get_system_prompt()
+    print(f"Current prompt in admin_prompt: {current_prompt}")
     return render_template('admin_prompt.html',
                          default_prompt=DEFAULT_SYSTEM_PROMPT,
-                         current_prompt=get_system_prompt(),
+                         current_prompt=current_prompt,
                          current_subject=get_current_subject(),
                          saved_prompts=saved_prompts)
 
 @app.route('/admin/prompt', methods=['POST'])
 @admin_required
 def update_prompt():
-    global SYSTEM_PROMPT, current_subject
-    
-    prompt_name = request.form.get('prompt_name')
-    new_prompt = request.form.get('prompt')
-    new_subject = request.form.get('subject')
-    set_as_default = request.form.get('set_as_default') == 'true'
-    
-    if not new_prompt:
-        return jsonify({'error': 'Prompt cannot be empty'}), 400
+    try:
+        global in_memory_current_prompt, in_memory_current_subject
         
-    # Update current subject
-    if new_subject:
-        print(f"New subject: {new_subject}")
-        if redis_client:
-            try:
-                redis_client.set('current_subject', new_subject)
-            except:
+        prompt_name = request.form.get('prompt_name')
+        new_prompt = request.form.get('prompt')
+        new_subject = request.form.get('subject')
+        set_as_default = request.form.get('set_as_default') == 'true'
+        
+        print(f"Received update request:")
+        print(f"prompt_name: {prompt_name}")
+        print(f"new_prompt: {new_prompt}")
+        print(f"new_subject: {new_subject}")
+        print(f"set_as_default: {set_as_default}")
+        
+        if not new_prompt:
+            return jsonify({'error': 'Prompt cannot be empty'}), 400
+            
+        # Update current subject
+        if new_subject:
+            print(f"New subject: {new_subject}")
+            if redis_client:
+                try:
+                    redis_client.set('current_subject', new_subject)
+                    print(f"Updated subject in Redis to: {new_subject}")
+                except Exception as e:
+                    print(f"Error updating subject in Redis: {str(e)}")
+                    in_memory_current_subject = new_subject
+                    print(f"Updated subject in memory to: {new_subject}")
+            else:
                 in_memory_current_subject = new_subject
-        else:
-            in_memory_current_subject = new_subject
-    
-    # Save prompt if name provided
-    if prompt_name:
-        save_prompt(prompt_name, new_prompt)
-    
-    # Set as current system prompt if requested
-    if set_as_default:
-        if redis_client:
-            try:
-                redis_client.set('current_prompt', new_prompt)
-            except:
-                in_memory_current_prompt = new_prompt
-        else:
-            in_memory_current_prompt = new_prompt
+                print(f"Updated subject in memory to: {new_subject}")
         
-    return jsonify({'message': 'Settings updated successfully'}), 200
+        # Save prompt if name provided
+        if prompt_name:
+            save_prompt(prompt_name, new_prompt)
+        
+        # Set as current system prompt if requested
+        if set_as_default:
+            if redis_client:
+                try:
+                    redis_client.set('current_prompt', new_prompt)
+                    print(f"Updated current prompt in Redis")
+                except Exception as e:
+                    print(f"Error updating current prompt in Redis: {str(e)}")
+                    in_memory_current_prompt = new_prompt
+                    print(f"Updated current prompt in memory")
+            else:
+                in_memory_current_prompt = new_prompt
+                print(f"Updated current prompt in memory")
+            
+        return jsonify({'message': 'Settings updated successfully'}), 200
+    except Exception as e:
+        print(f"Error in update_prompt: {str(e)}")
+        return jsonify({'error': f'An error occurred: {str(e)}'}), 500
 
 @app.route('/api/prompts', methods=['DELETE'])
 @admin_required
