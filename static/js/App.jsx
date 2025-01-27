@@ -5,7 +5,7 @@ import ChatComponent from './ChatComponent';
 import './styles.css';
 
 const App = () => {
-    const [subject, setSubject] = useState('Python');
+    const [subject, setSubject] = useState('Java');
 
     useEffect(() => {
         const fetchSubject = async () => {

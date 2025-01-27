@@ -23,6 +23,9 @@ app = Flask(__name__,
 )
 CORS(app)
 
+# Redis key prefixes for this instance
+REDIS_PREFIX = 'java_tutor:'
+
 # Try to initialize Redis if available
 try:
     import redis
@@ -50,7 +53,7 @@ with open('optimized_prompt.txt', 'r') as file:
     DEFAULT_SYSTEM_PROMPT = file.read().strip()
 
 # Default subject
-DEFAULT_SUBJECT = "Python"
+DEFAULT_SUBJECT = "Java"
 
 # Admin credentials
 ADMIN_USERNAME = os.getenv('ADMIN_USERNAME', 'admin')
@@ -67,7 +70,7 @@ def get_saved_prompts():
     """Get all saved prompts"""
     try:
         if USE_REDIS:
-            prompts = redis_client.hgetall('saved_prompts')
+            prompts = redis_client.hgetall(f'{REDIS_PREFIX}saved_prompts')
             return {k.decode('utf-8'): v.decode('utf-8') for k, v in prompts.items()}
         return in_memory_storage['saved_prompts']
     except Exception as e:
@@ -78,7 +81,7 @@ def save_prompt(name, prompt):
     """Save a prompt with a name"""
     try:
         if USE_REDIS:
-            redis_client.hset('saved_prompts', name, prompt)
+            redis_client.hset(f'{REDIS_PREFIX}saved_prompts', name, prompt)
         else:
             in_memory_storage['saved_prompts'][name] = prompt
         return True
@@ -90,7 +93,7 @@ def delete_prompt(name):
     """Delete a saved prompt"""
     try:
         if USE_REDIS:
-            redis_client.hdel('saved_prompts', name)
+            redis_client.hdel(f'{REDIS_PREFIX}saved_prompts', name)
         else:
             if name in in_memory_storage['saved_prompts']:
                 del in_memory_storage['saved_prompts'][name]
@@ -146,7 +149,7 @@ def get_system_prompt():
     """Get system prompt from Redis/memory or fallback to default"""
     try:
         if USE_REDIS:
-            prompt = redis_client.get('system_prompt')
+            prompt = redis_client.get(f'{REDIS_PREFIX}system_prompt')
             if prompt:
                 return prompt.decode('utf-8')
         elif in_memory_storage['system_prompt']:
@@ -160,7 +163,7 @@ def get_subject():
     """Get subject from Redis/memory or fallback to default"""
     try:
         if USE_REDIS:
-            subject = redis_client.get('subject')
+            subject = redis_client.get(f'{REDIS_PREFIX}subject')
             if subject:
                 return subject.decode('utf-8')
         elif in_memory_storage['subject']:
@@ -179,7 +182,7 @@ def set_system_prompt(prompt, set_as_default=False):
                 file.write(prompt)
         
         if USE_REDIS:
-            redis_client.set('system_prompt', prompt)
+            redis_client.set(f'{REDIS_PREFIX}system_prompt', prompt)
         else:
             in_memory_storage['system_prompt'] = prompt
         return True
@@ -192,7 +195,7 @@ def set_subject(subject):
     try:
         # First store the subject
         if USE_REDIS:
-            redis_client.set('subject', subject)
+            redis_client.set(f'{REDIS_PREFIX}subject', subject)
         else:
             in_memory_storage['subject'] = subject
         
@@ -263,7 +266,7 @@ def get_or_create_chat(session_id):
         
         if USE_REDIS:
             # Try to get existing session from Redis
-            session_data = redis_client.get(f"chat_session:{session_id}")
+            session_data = redis_client.get(f"{REDIS_PREFIX}chat_session:{session_id}")
             if session_data:
                 session_dict = json.loads(session_data)
                 chat_session = ChatSession.from_dict(session_id, session_dict)
@@ -280,7 +283,7 @@ def get_or_create_chat(session_id):
             if USE_REDIS:
                 # Save to Redis
                 redis_client.set(
-                    f"chat_session:{session_id}",
+                    f"{REDIS_PREFIX}chat_session:{session_id}",
                     json.dumps(chat_session.to_dict())
                 )
             else:
@@ -305,7 +308,7 @@ def cleanup_old_sessions():
     """Remove expired sessions"""
     try:
         if USE_REDIS:
-            pattern = "chat_session:*"
+            pattern = f"{REDIS_PREFIX}chat_session:*"
             for key in redis_client.scan_iter(match=pattern):
                 session_data = redis_client.get(key)
                 if session_data:
@@ -477,7 +480,7 @@ def chat_endpoint():
             # Save updated session
             if USE_REDIS:
                 redis_client.set(
-                    f"chat_session:{session_id}",
+                    f"{REDIS_PREFIX}chat_session:{session_id}",
                     json.dumps(chat_session.to_dict())
                 )
             else:
