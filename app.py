@@ -262,6 +262,13 @@ def update_prompt():
     # Update current subject
     if new_subject:
         current_subject = new_subject
+        if redis_client:
+            try:
+                redis_client.set('current_subject', new_subject)
+            except:
+                in_memory_current_subject = new_subject
+        else:
+            in_memory_current_subject = new_subject
     
     # Save prompt if name provided
     if prompt_name:
